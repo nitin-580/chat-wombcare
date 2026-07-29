@@ -19,7 +19,10 @@ import {
   User,
   Lock,
   ExternalLink,
-  ShieldAlert
+  ShieldAlert,
+  Check,
+  Globe,
+  ArrowLeft
 } from 'lucide-react';
 
 interface Message {
@@ -50,6 +53,8 @@ interface UserProfile {
   mood?: string;
   weight?: number;
   wellness_goal?: string;
+  active_plan?: string;
+  is_premium?: boolean;
 }
 
 export default function Home() {
@@ -62,6 +67,7 @@ export default function Home() {
   
   // User Data States
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [isPlanChecking, setIsPlanChecking] = useState<boolean>(true);
   
   // Chat States
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -81,15 +87,42 @@ export default function Home() {
     if (token && storedUserData) {
       try {
         const parsedUser = JSON.parse(storedUserData);
-        setUser(parsedUser);
-        setIsLoggedIn(true);
-        fetchSessions(parsedUser.id);
-        createNewSession();
+        fetchUserProfile(parsedUser.id);
       } catch (err) {
         console.error('Error parsing stored user data:', err);
+        setIsPlanChecking(false);
       }
+    } else {
+      setIsPlanChecking(false);
     }
   }, []);
+
+  const fetchUserProfile = async (userId: string) => {
+    setIsPlanChecking(true);
+    try {
+      const res = await fetch(`/api/profile?userId=${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.profile) {
+          setUser(data.profile);
+          setIsLoggedIn(true);
+          fetchSessions(userId);
+          createNewSession();
+        } else {
+          // Fallback to local storage values if profile details are not in DB
+          const storedUserData = localStorage.getItem('userData');
+          if (storedUserData) {
+            setUser(JSON.parse(storedUserData));
+            setIsLoggedIn(true);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch user profile:', err);
+    } finally {
+      setIsPlanChecking(false);
+    }
+  };
 
   // Scroll to bottom when messages update
   useEffect(() => {
@@ -114,6 +147,7 @@ export default function Home() {
 
       if (!res.ok || !data.success) {
         setLoginError(data.message || 'Invalid email or password');
+        setIsLoginLoading(false);
         return;
       }
 
@@ -121,14 +155,11 @@ export default function Home() {
       localStorage.setItem('userToken', data.token);
       localStorage.setItem('userData', JSON.stringify(data.doctor));
       
-      setUser(data.doctor);
-      setIsLoggedIn(true);
-      fetchSessions(data.doctor.id);
-      createNewSession();
+      // Fetch fresh profile with active plan verification from Supabase
+      await fetchUserProfile(data.doctor.id);
     } catch (err) {
       setLoginError('Connection to Wombcare backend failed. Please try again.');
       console.error('Login Error:', err);
-    } finally {
       setIsLoginLoading(false);
     }
   };
@@ -345,17 +376,26 @@ export default function Home() {
     return resultElements;
   };
 
+  // 1. Loading Check State
+  if (isPlanChecking) {
+    return (
+      <div className="min-h-screen w-screen bg-[#F8F4FF] flex items-center justify-center">
+        <div className="flex flex-col items-center">
+          <div className="w-10 h-10 border-4 border-rose-500 border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Verifying Care Program Status...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Unauthenticated Login Screen
   if (!isLoggedIn) {
-    /* LOGIN VIEW - MATCHING WOMBCARE REFERRAL LOGS CONSOLE EXACTLY */
     return (
       <main className="min-h-screen w-screen bg-[#F8F4FF] relative flex items-center justify-center p-6 overflow-hidden selection:bg-[#FFE5EF] selection:text-[#FF4D8D] font-sans">
-        
-        {/* Soft feminine styling background blobs */}
         <div className="absolute top-[-20%] left-[-20%] w-[60%] h-[60%] rounded-full bg-[#FFE5EF]/50 blur-[100px] pointer-events-none" />
         <div className="absolute bottom-[-20%] right-[-20%] w-[60%] h-[60%] rounded-full bg-[#EEE9FF]/50 blur-[100px] pointer-events-none" />
 
         <div className="w-full max-w-md bg-white/90 backdrop-blur-md rounded-[30px] border border-white shadow-xl p-8 relative z-10 transition-all duration-300 animate-slide-in">
-          
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
               <Image
@@ -428,6 +468,150 @@ export default function Home() {
               )}
             </button>
           </form>
+        </div>
+      </main>
+    );
+  }
+
+  // 3. Restriction Validation (Validate if user is premium/active program subscriber)
+  const isPremiumUser = !!(user?.active_plan || user?.is_premium);
+
+  if (!isPremiumUser) {
+    const plans = [
+      {
+        name: "Complete PMOS Care",
+        price: "₹2999",
+        duration: "3 Months",
+        description: "90 Days PMOS care program",
+        tag: "Recommended",
+        features: [
+          "Period Tracker Logs",
+          "Daily Hydration Trackers",
+          "Insulin resistance guidelines",
+          "1-on-1 care consultation",
+        ],
+        highlighted: true
+      },
+      {
+        name: "Conceive Care",
+        price: "₹4999",
+        duration: "3 Months",
+        description: "Designed for preparing your conception journey.",
+        tag: "Fertility support",
+        features: [
+          "Ovulation tracking logs",
+          "Cycle wellness guides",
+          "High protein nutrition tips",
+          "Dedicated medical coach",
+        ],
+        highlighted: false
+      },
+      {
+        name: "NRI Special",
+        price: "$32",
+        duration: "3 Months",
+        description: "Premium doctor-guided care program tailored for international users.",
+        tag: "International Plan",
+        features: [
+          "Everything in PMOS Care",
+          "Global Call consults",
+          "Custom timezone coaching",
+          "Dedicated priority help",
+        ],
+        highlighted: false
+      }
+    ];
+
+    return (
+      <main className="min-h-screen w-screen bg-[#FDF8F8] relative flex flex-col items-center justify-center p-6 font-sans">
+        <div className="w-full max-w-4xl bg-white border border-[#F5E2E2] rounded-[32px] shadow-xl p-8 flex flex-col items-center relative overflow-hidden">
+          
+          {/* Header */}
+          <div className="text-center max-w-xl mb-8 flex flex-col items-center">
+            <div className="mb-4 relative w-16 h-16 rounded-xl overflow-hidden flex items-center justify-center bg-rose-50 border border-rose-100">
+              <Image src="/logo.png" alt="WombCare Logo" width={48} height={48} className="object-contain" />
+            </div>
+            
+            <h2 className="text-2xl font-black text-slate-800 leading-none">Hormonal Health Plan Required</h2>
+            <p className="text-rose-600 font-bold text-xs uppercase tracking-wider mt-2.5">AI Access Limited</p>
+            <p className="text-slate-500 text-sm mt-3 leading-relaxed">
+              We noticed you don't have an active care program. Divya requires an active WombCare plan to sync with trackers and assist you. Choose one of our doctor-backed programs below:
+            </p>
+          </div>
+
+          {/* Pricing Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full mb-8">
+            {plans.map((p, idx) => (
+              <div
+                key={idx}
+                className={`p-6 rounded-3xl border flex flex-col justify-between transition-all ${
+                  p.highlighted
+                    ? 'bg-rose-50/50 border-rose-200 shadow-md ring-2 ring-rose-500/20'
+                    : 'bg-[#FAFAFA] border-slate-100'
+                }`}
+              >
+                <div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                    p.highlighted ? 'bg-rose-600 text-white' : 'bg-slate-200 text-slate-600'
+                  }`}>
+                    {p.tag}
+                  </span>
+                  <h3 className="font-extrabold text-slate-800 text-lg mt-3">{p.name}</h3>
+                  <p className="text-xs text-slate-400 mt-1 min-h-[32px]">{p.description}</p>
+                  
+                  <div className="mt-4 flex items-baseline gap-1">
+                    <span className="text-3xl font-black text-slate-900">{p.price}</span>
+                    <span className="text-xs text-slate-400">/ {p.duration}</span>
+                  </div>
+
+                  <ul className="mt-5 space-y-2 border-t border-slate-100 pt-4">
+                    {p.features.map((f, fIdx) => (
+                      <li key={fIdx} className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+                        <Check size={12} className="text-rose-500 shrink-0" />
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <a
+                  href={`https://wombcare.in/pricing?plan=${encodeURIComponent(p.name)}`}
+                  target="_blank"
+                  className={`mt-6 w-full py-2.5 rounded-xl text-center text-xs font-bold transition ${
+                    p.highlighted
+                      ? 'bg-rose-600 text-white hover:bg-rose-500 shadow-md'
+                      : 'bg-white text-slate-800 hover:bg-slate-50 border border-slate-200'
+                  }`}
+                >
+                  Purchase Plan
+                </a>
+              </div>
+            ))}
+          </div>
+
+          {/* Activation Disclaimer */}
+          <div className="bg-[#FFF4F4] border border-[#FBE6E6] rounded-2xl p-4 text-center max-w-xl text-xs text-slate-600 mb-6 font-semibold flex items-center justify-center gap-2">
+            <ShieldAlert size={16} className="text-rose-600 shrink-0" />
+            <span>Already bought a plan? Please contact the WombCare Support Admin (hello@wombcare.in) with your receipt to activate your account.</span>
+          </div>
+
+          {/* Actions Bar */}
+          <div className="flex gap-4 items-center w-full justify-center">
+            <a
+              href="https://wombcare.in"
+              className="flex items-center gap-1.5 px-6 py-3 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-2xl text-xs transition"
+            >
+              <ArrowLeft size={14} />
+              <span>Back to Wombcare.in</span>
+            </a>
+            
+            <button
+              onClick={handleLogout}
+              className="px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl text-xs transition"
+            >
+              Sign Out
+            </button>
+          </div>
 
         </div>
       </main>
@@ -576,7 +760,7 @@ export default function Home() {
               
               {/* Prominent Salutation */}
               <div className="mb-10 text-center">
-                <h1 className="text-4xl md:text-5xl font-bold text-slate-900 tracking-tight mb-3 animate-fade-in">
+                <h1 className="text-4xl md:text-5xl font-bold text-slate-900 tracking-tight mb-3">
                   Hi {user?.name ? user.name.split(' ')[0] : 'there'}, I'm Divya.
                 </h1>
                 <p className="text-xl md:text-2xl text-slate-500 font-medium max-w-[600px] mx-auto">
